@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LOCKFLOW · חיבור ה-iPhone</title>
+<meta name="theme-color" content="#0a0a0a">
+<meta name="color-scheme" content="dark">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg-0:#0a0a0a; --bg-2:#161616; --surface-card:#1c1c1e; --surface-raised:#2a2a2d;
+    --border-subtle:rgba(255,255,255,0.06); --fg-1:#f5f5f5; --fg-2:#a1a1a6; --fg-3:#6b6b70; --fg-4:#3a3a3e;
+    --accent:#22c55e; --warn:#e0b45b; --warn-dim:rgba(224,180,91,0.14);
+    --font-sans:'Urbanist',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --font-mono:ui-monospace,'SF Mono',Menlo,monospace;
+    --radius-sm:10px; --radius-md:18px; --radius-pill:999px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg-0);color:var(--fg-1);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;color-scheme:dark}
+  body{padding:calc(env(safe-area-inset-top,0px) + 24px) 16px calc(env(safe-area-inset-bottom,0px) + 48px)}
+  main{max-width:640px;margin:0 auto;display:grid;gap:14px}
+  main>*,ol>li{min-width:0}
+  a{color:var(--fg-1)}
+  .back{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);text-decoration:none;font-weight:500}
+  h1{font-size:28px;line-height:1.2;letter-spacing:-0.02em;margin:10px 0 4px;text-wrap:balance}
+  h2{font-size:19px;letter-spacing:-0.01em;margin:0 0 10px;text-wrap:balance}
+  p,li{font-size:16px;line-height:1.6;color:var(--fg-2)}
+  p{margin:0 0 10px}
+  strong,b{color:var(--fg-1);font-weight:600}
+  section{background:var(--surface-card);border-radius:var(--radius-md);padding:20px}
+  .lead{font-size:17px;color:var(--fg-2);margin:0}
+  ol{margin:0;padding-inline-start:22px;display:grid;gap:14px}
+  ol li::marker{color:var(--fg-3);font-variant-numeric:tabular-nums}
+  .en{direction:ltr;unicode-bidi:isolate;font-weight:600;color:var(--fg-1)}
+  .tpl{direction:ltr;text-align:left;font-family:var(--font-mono);font-size:14px;line-height:2;background:var(--bg-2);
+    border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 12px;margin:8px 0 0;overflow-x:auto;white-space:pre}
+  .var{display:inline-block;background:var(--surface-raised);color:var(--fg-1);border-radius:6px;padding:0 6px;line-height:1.6;font-family:var(--font-sans);font-size:13px;font-weight:600}
+  .url{display:flex;gap:8px;align-items:stretch;margin-top:8px;direction:ltr}
+  .url code{flex:1;min-width:0;font-family:var(--font-mono);font-size:13px;background:var(--bg-2);border:1px solid var(--border-subtle);
+    border-radius:var(--radius-sm);padding:10px 12px;overflow-wrap:anywhere;color:var(--fg-1)}
+  .btn{appearance:none;border:0;background:var(--surface-raised);color:var(--fg-1);font:inherit;font-weight:600;font-size:15px;
+    padding:10px 16px;border-radius:var(--radius-pill);cursor:pointer;white-space:nowrap}
+  .btn:active{transform:scale(.98)}
+  .note{background:var(--warn-dim);color:var(--warn);border-radius:var(--radius-sm);padding:12px 14px;font-size:15px;line-height:1.55;margin:12px 0 0}
+  .icon-wrap{display:flex;gap:16px;align-items:center;margin:6px 0 10px}
+  .icon-wrap img{width:96px;height:96px;border-radius:22px;box-shadow:0 0 0 1px var(--border-subtle)}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  td{padding:8px 0;border-top:1px solid var(--border-subtle);color:var(--fg-2);vertical-align:top}
+  td:first-child{direction:ltr;font-family:var(--font-mono);color:var(--fg-1);white-space:nowrap;padding-inline-end:14px;text-align:right}
+  :focus-visible{outline:2px solid var(--fg-2);outline-offset:2px}
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <a class="back" href="./">‹ LOCKFLOW</a>
+    <h1>חיבור ה-iPhone ל-LOCKFLOW</h1>
+    <p class="lead">קיצור אחד באפליקציית קיצורים אוסף את היומן, התזכורות ונתוני הבריאות של היום, ופותח את LOCKFLOW עם הנתונים. הוא רץ לבד ב-9:00 וב-20:00, ואפשר לפתוח אותו גם מאייקון במסך הבית.</p>
+  </div>
+
+  <section>
+    <h2>פרטיות</h2>
+    <p>הנתונים עוברים בחלק של הכתובת שאחרי הסימן <span class="en">#</span>. הדפדפן אף פעם לא שולח את החלק הזה לשרת. הם נשמרים רק ב-Safari בטלפון שלך.</p>
+  </section>
+
+  <section>
+    <h2>1. יצירת הקיצור</h2>
+    <p>פותחים את <b>קיצורים</b> ← <b>+</b> ← קוראים לקיצור <span class="en">LOCKFLOW</span>. מוסיפים את הפעולות לפי הסדר. אם הטלפון בעברית ושם הפעולה לא נמצא, מחפשים לפי המילה שבסוגריים.</p>
+    <ol>
+      <li><span class="en">Find Calendar Events</span> (יומן). מסנן: <span class="en">Start Date · is today</span>. מיון: <span class="en">Start Date · Oldest First</span>.</li>
+      <li><span class="en">Repeat with Each</span> (חזרה) על האירועים. בתוך הלולאה מוסיפים <span class="en">Text</span> (טקסט) ובונים את השורה:
+        <div class="tpl">E|<span class="var">Start Date · HH:mm</span>|<span class="var">End Date · HH:mm</span>|<span class="var">Title</span></div>
+        <p style="margin-top:8px">מקלידים <span class="en">E|</span>, מכניסים את המשתנה <span class="en">Repeat Item</span>, לוחצים עליו ובוחרים <span class="en">Start Date</span>. בתבנית התאריך בוחרים <span class="en">Custom</span> וכותבים <span class="en">HH:mm</span>. כך גם לשאר.</p></li>
+      <li>אחרי <span class="en">End Repeat</span>: <span class="en">Combine Text</span> (שילוב) על <span class="en">Repeat Results</span>, עם <span class="en">New Lines</span>. ואז <span class="en">Set Variable</span> (משתנה) בשם <span class="en">Events</span>.</li>
+      <li><span class="en">Find Reminders</span> (תזכורות). מסננים: <span class="en">Is Completed · is false</span>, <span class="en">Due Date · is today</span>.</li>
+      <li><span class="en">Repeat with Each</span> על התזכורות. בפנים, <span class="en">Text</span>:
+        <div class="tpl">R|<span class="var">List</span>|<span class="var">Title</span></div>
+        <p style="margin-top:8px">אחרי <span class="en">End Repeat</span>: <span class="en">Combine Text</span> עם <span class="en">New Lines</span>, ואז <span class="en">Set Variable</span> בשם <span class="en">Reminders</span>.</p></li>
+      <li><span class="en">Find Health Samples</span> (בריאות). סוג: <span class="en">Steps</span>, מסנן <span class="en">Start Date · is today</span>. אחריה <span class="en">Calculate Statistics</span> (סטטיסטיקה) ← <span class="en">Sum</span>, ואז <span class="en">Set Variable</span> בשם <span class="en">Steps</span>.</li>
+      <li>אותו דבר עם הסוג <span class="en">Walking + Running Distance</span>, לתוך משתנה בשם <span class="en">KM</span>.</li>
+      <li>רק אם יש לך Apple Watch: אותו דבר עם <span class="en">Exercise Minutes</span>, לתוך משתנה בשם <span class="en">Exercise</span>. בלי שעון מדלגים, ובשלב הבא משמיטים את השורה שמתחילה ב-<span class="en">M</span>.</li>
+      <li><span class="en">Text</span>. זה הטקסט הסופי, כל פריט בשורה משלו:
+        <div class="tpl">T|<span class="var">Current Date · yyyy-MM-dd</span>
+S|<span class="var">Steps</span>
+K|<span class="var">KM</span>
+M|<span class="var">Exercise</span>
+<span class="var">Events</span>
+<span class="var">Reminders</span></div></li>
+      <li><span class="en">URL Encode</span> (קידוד) על הטקסט מהשלב הקודם.</li>
+      <li><span class="en">Text</span>: מדביקים את הכתובת הזו, ובסופה מכניסים את המשתנה <span class="en">URL Encoded Text</span>:
+        <div class="url"><code id="sync-url">…</code><button class="btn" type="button" id="copy">Copy</button></div></li>
+      <li><span class="en">Open URLs</span> (פתיחת כתובות) על הטקסט מהשלב הקודם.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>2. הרצה ראשונה</h2>
+    <p>מריצים את הקיצור פעם אחת ידנית ומאשרים כל בקשת הרשאה (יומן, תזכורות, בריאות, פתיחת האתר). כשיש אפשרות, בוחרים <b>אפשר תמיד</b>. בלי האישורים האלה האוטומציה לא תוכל לרוץ לבד.</p>
+    <p>אם הכל עבד, נפתח Safari עם LOCKFLOW, ולמעלה מופיעה הודעה כמו <span class="en">Synced · 3 events · 2 reminders</span>.</p>
+  </section>
+
+  <section>
+    <h2>3. אייקון במסך הבית</h2>
+    <div class="icon-wrap"><img src="icons/apple-touch-icon.png" alt="אייקון LOCKFLOW"><p style="margin:0">לחיצה ארוכה על התמונה ← <b>שמור בתמונות</b>.</p></div>
+    <p>בקיצורים: לחיצה ארוכה על LOCKFLOW ← <b>שיתוף</b> ← <b>הוסף למסך הבית</b>. לוחצים על האייקון הקטן ← בוחרים את התמונה ששמרת.</p>
+    <p class="note">חשוב: לא מוסיפים את האתר עצמו מ-Safari למסך הבית. האייקון של הקיצור הוא הדרך הנכונה, כי כל פתיחה ממנו גם מסנכרנת.</p>
+  </section>
+
+  <section>
+    <h2>4. פתיחה אוטומטית ב-9:00 וב-20:00</h2>
+    <p>קיצורים ← <b>אוטומציה</b> ← <b>+</b> ← <b>שעה ביום</b> ← 9:00, כל יום ← <b>הפעל מיד</b> ← בוחרים את הקיצור LOCKFLOW. חוזרים על אותו דבר ל-20:00.</p>
+    <p>LOCKFLOW עוברת לבד למצב סגירת היום משעה 16:00. אפשר לשנות את זה בהגדרות.</p>
+    <p>אם הטלפון נעול באותו רגע, ייתכן שהדף ייפתח רק אחרי שתפתח את הנעילה.</p>
+  </section>
+
+  <section>
+    <h2>5. שהכרטיסיות לא יצטברו</h2>
+    <p>כל הרצה של הקיצור פותחת כרטיסייה חדשה ב-Safari. בהגדרות ← <b>אפליקציות</b> ← <b>Safari</b> ← <b>סגירת כרטיסיות</b> ← <b>אחרי יום</b>.</p>
+  </section>
+
+  <section>
+    <h2>אם משהו לא עובד</h2>
+    <p>בהגדרות של LOCKFLOW (<span class="en">Settings &amp; iPhone sync</span>) רואים מתי היה הסנכרון האחרון ומה הגיע בו.</p>
+    <p>כדי לראות מה הקיצור מייצר: מוסיפים בסופו <span class="en">Copy to Clipboard</span> על הטקסט משלב 9, ומדביקים ב-<span class="en">Paste sync text</span> בהגדרות.</p>
+    <p>שורה ריקה (למשל בלי שעון, או יום בלי נתונים) זה בסדר, LOCKFLOW מדלגת עליה.</p>
+    <table>
+      <tr><td>T|2026-10-31</td><td>התאריך של הנתונים</td></tr>
+      <tr><td>E|09:30|10:00|…</td><td>אירוע ביומן (00:00|00:00 = כל היום)</td></tr>
+      <tr><td>R|רשימה|…</td><td>תזכורת להיום</td></tr>
+      <tr><td>S|6420</td><td>צעדים היום</td></tr>
+      <tr><td>K|4.8</td><td>ק״מ הליכה וריצה היום</td></tr>
+      <tr><td>M|34</td><td>דקות אימון היום</td></tr>
+    </table>
+  </section>
+</main>
+<script>
+  (function () {
+    var url = new URL('./', location.href).href + '#sync=';
+    var el = document.getElementById('sync-url');
+    el.textContent = url;
+    var btn = document.getElementById('copy');
+    btn.addEventListener('click', function () {
+      function done() { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1800); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, function () { select(); });
+      } else { select(); }
+      function select() { var r = document.createRange(); r.selectNodeContents(el); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+    });
+  })();
+</script>
+</body>
+</html>
