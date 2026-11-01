@@ -1,7 +1,7 @@
 /* LOCKFLOW service worker — opens offline after the first visit.
    Same-origin files: network first (updates arrive right away), cache when offline.
    Pinned CDN files (versioned URLs, never change): cache first. */
-const VERSION = 'lockflow-v3';
+const VERSION = 'lockflow-v4';
 const CORE = [
   './',
   './index.html',

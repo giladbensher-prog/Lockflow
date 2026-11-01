@@ -13,6 +13,19 @@ design system (`vendor/ds-bundle.js`).
 - Shortcut automations at 9:00 and 20:00 open the app on schedule.
 - Step-by-step setup (Hebrew): `setup.html` — also linked from the app.
 
+### Onboarding and the weekly training plan
+- First run asks about GYM (sports; fixed days or a number of times a week;
+  who plans: **AI**, **my own plan**, or **mix**; conditions and session length),
+  BIZ and SOCIAL. Settings → **Edit setup** reopens it.
+- The AI steps hand a ready prompt to the Claude app (it knows the user from
+  their chats) and read back a `KEY: value` template. Plans use `SUN:`…`SAT:`
+  for fixed days or `S1:`, `S2:`… for a schedule that moves.
+- Plans are stored per week (`plans[<Sunday yyyy-mm-dd>]`). On Saturday the app
+  shows the week's report and asks for next week's plan: the AI proposes →
+  **Happy with this plan?** → yes locks it in, no opens changes (tell the AI
+  what doesn't fit, or edit lines by hand). A session counts as done when a GYM
+  anchor with the same title is closed.
+
 ### Sync format
 One record per line, fields split by `|`:
 

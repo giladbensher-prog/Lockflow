@@ -123,19 +123,49 @@
   const emptyDay = () => ({ GYM: emptySection(), BIZ: emptySection(), SOCIAL: emptySection() });
   const defaults = () => ({
     v: 1, days: {}, health: {}, sync: null, settings: { weekGoal: 4, pmHour: 16 },
-    profile: null, onboarding: null,
+    profile: null, onboarding: null, plans: {},
   });
 
-  /* ---------- profile (from onboarding) ---------- */
+  /* ---------- weeks (Sunday → Saturday) ---------- */
+  const weekOf = (k) => keyOf(addDays(dateOf(k), -dateOf(k).getDay()));
+  const nextWeekOf = (k) => keyOf(addDays(dateOf(weekOf(k)), 7));
+  const weekDays = (wk) => Array.from({ length: 7 }, (_, i) => keyOf(addDays(dateOf(wk), i)));
+  const shortDate = (k) => { const d = dateOf(k); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+
+  /* ---------- profile (from onboarding) ----------
+     gym.days: fixed training days, or [] with gym.perWeek for a schedule that moves.
+     gym.planner: 'ai' (AI plans) · 'mix' (AI drafts, you shape it) · 'self' (your own plan). */
+  const PLANNERS = {
+    ai: 'AI plans your training',
+    mix: 'AI drafts, you shape it',
+    self: 'You plan your own training',
+  };
   const emptyProfile = () => ({
-    gym: { sports: [], other: '', days: [], planner: null, plan: null },
+    gym: { sports: [], other: '', days: [], perWeek: null, planner: null, conditions: '', minutes: null, firstPlan: null },
     biz: { name: '', what: '', stage: '', focus: '', next: [] },
     social: { postsPerWeek: 3, platforms: {}, types: [], other: '', style: '', ideas: [], note: '' },
   });
   function mergeProfile(p) {
     if (!p) return null;
     const e = emptyProfile();
-    return { ...p, gym: { ...e.gym, ...(p.gym || {}) }, biz: { ...e.biz, ...(p.biz || {}) }, social: { ...e.social, ...(p.social || {}) } };
+    const gym = { ...e.gym, ...(p.gym || {}) };
+    if (gym.planner === 'claude') gym.planner = 'ai';
+    return { ...p, gym, biz: { ...e.biz, ...(p.biz || {}) }, social: { ...e.social, ...(p.social || {}) } };
+  }
+  const trainingTarget = (state) => {
+    const g = state.profile && state.profile.gym;
+    return (g && (g.days.length || g.perWeek)) || state.settings.weekGoal;
+  };
+  /* Which of a week's planned sessions are done: a closed GYM anchor with the same title. */
+  function sessionsDone(state, plan, wk) {
+    const done = plan.sessions.map(() => false);
+    weekDays(wk).forEach((k) => {
+      const a = state.days[k] && state.days[k].GYM.anchor;
+      if (!a || !a.done) return;
+      const i = plan.sessions.findIndex((s, j) => !done[j] && s.title === a.title);
+      if (i > -1) done[i] = true;
+    });
+    return done;
   }
   const withOther = (list, other) => [...list, ...(other && other.trim() ? [other.trim()] : [])];
   const dayList = (days) => [...days].sort((a, b) => a - b).map((d) => DAY3[d]).join(', ');
@@ -157,8 +187,21 @@
       if (raw) {
         const s = JSON.parse(raw);
         const d = defaults();
+        const plans = { ...(s.plans || {}) };
+        // earlier versions kept one weekday plan on the profile
+        const old = s.profile && s.profile.gym && s.profile.gym.plan;
+        if (old && old.days) {
+          const wk = weekOf(old.at || keyOf(new Date()));
+          if (!plans[wk]) {
+            plans[wk] = {
+              sessions: Object.keys(old.days).map(Number).sort((a, b) => a - b).map((day) => ({ title: old.days[day], day })),
+              goal: old.goal || '', note: '', status: 'accepted',
+            };
+          }
+          delete s.profile.gym.plan;
+        }
         return {
-          ...d, ...s,
+          ...d, ...s, plans,
           settings: { ...d.settings, ...(s.settings || {}) },
           profile: mergeProfile(s.profile),
           onboarding: s.onboarding && s.onboarding.profile ? { ...s.onboarding, profile: mergeProfile(s.onboarding.profile) } : null,
@@ -283,18 +326,56 @@
       'NEXT: another one',
     ].join('\n');
   }
-  function gymPrompt(p) {
-    const g = p.gym;
+  /* Training plans: fixed days use SUN…SAT keys; a schedule that moves uses S1, S2, … */
+  const PLAN_RULES = 'Write the values in the language we usually talk in. Keep the keys in English exactly as written, one per line, ' +
+    'and put the template inside a code block. If you don’t know something, write ? instead of guessing.';
+  function gymBasics(g) {
     const days = [...g.days].sort((a, b) => a - b);
     return [
-      'I’m setting up LOCKFLOW, my daily planning app. Plan my training week.',
       `Sports: ${withOther(g.sports, g.other).join(', ') || 'not set'}`,
-      `Training days: ${days.map((d) => WEEKDAYS[d]).join(', ') || 'any'}`,
-      'Use what you know about my fitness and goals from our conversations. One workout per training day, short enough for one line: what, how much, how hard.',
-      RULES, '',
+      days.length ? `Training days: ${days.map((d) => WEEKDAYS[d]).join(', ')}`
+        : `Sessions this week: ${g.perWeek || 3}, on no fixed days — my schedule moves week to week`,
+      g.minutes ? `Time per session: about ${g.minutes} minutes` : null,
+      g.conditions && g.conditions.trim() ? `My conditions: ${g.conditions.trim()}` : null,
+    ].filter(Boolean);
+  }
+  function sessionKeys(g) {
+    const days = [...g.days].sort((a, b) => a - b);
+    return days.length ? days.map((d) => DAYKEY[d]) : Array.from({ length: g.perWeek || 3 }, (_, i) => `S${i + 1}`);
+  }
+  function planTemplate(plan) {
+    return [
       'LOCKFLOW-GYM',
-      ...(days.length ? days : [0, 1, 2, 3, 4, 5, 6]).map((d) => `${DAYKEY[d]}: the workout`),
+      ...plan.sessions.map((s, i) => `${s.day != null ? DAYKEY[s.day] : `S${i + 1}`}: ${s.title || '?'}`),
+      `GOAL: ${plan.goal || '?'}`,
+      `NOTE: ${plan.note || ''}`,
+    ].join('\n');
+  }
+  function planPrompt(p, wk, report) {
+    const g = p.gym;
+    return [
+      `I use LOCKFLOW, my daily planning app. Plan my training for the week starting ${longDate(dateOf(wk))}.`,
+      ...gymBasics(g),
+      report ? `How last week went: ${report}` : null,
+      'Use what you know about my fitness and goals from our conversations. One line per session: what, how much, how hard.',
+      g.planner === 'mix'
+        ? 'This is a first draft we’ll shape together. Keep it simple, and on the NOTE line say what you assumed about my conditions and what you’d like to know. Then ask me if I’m happy with it. If I’m not, we adjust it together — every time you change it, send the full template again.'
+        : 'After the plan, ask me if I’m happy with it. If I’m not, adjust it with me — every time you change it, send the full template again.',
+      PLAN_RULES, '',
+      'LOCKFLOW-GYM',
+      ...sessionKeys(g).map((k) => `${k}: the workout`),
       'GOAL: what this week builds toward, one sentence',
+      'NOTE: assumptions or questions, or leave empty',
+    ].filter((x) => x !== null).join('\n');
+  }
+  function revisePrompt(p, wk, plan, feedback) {
+    return [
+      `Here is my LOCKFLOW training plan for the week starting ${longDate(dateOf(wk))}:`,
+      planTemplate(plan), '',
+      `What I want to change: ${feedback.trim() || '(I’ll tell you in the chat)'}`,
+      ...gymBasics(p.gym),
+      'Adjust the plan to fit. If something doesn’t fit my real conditions, ask me. Every time you change it, send the full updated template again.',
+      PLAN_RULES,
     ].join('\n');
   }
   function socialPrompt(p) {
@@ -317,7 +398,7 @@
   function parseKV(text) {
     const out = [];
     String(text).split(/\r?\n/).forEach((line) => {
-      const m = line.replace(/^[\s>*\-`#]+/, '').replace(/\*\*/g, '').match(/^([A-Za-z]{2,6})\s*[:：]\s*(.*)$/);
+      const m = line.replace(/^[\s>*\-`#]+/, '').replace(/\*\*/g, '').match(/^([A-Za-z][A-Za-z0-9]{1,5})\s*[:：]\s*(.*)$/);
       if (!m) return;
       const v = m[2].trim().replace(/^["“]|["”]$/g, '').trim();
       if (v && v !== '?' && v !== '…' && v !== '...') out.push([m[1].toUpperCase(), v]);
@@ -333,14 +414,50 @@
     r.ok = !!(r.name || r.what || r.focus || r.next.length);
     return r;
   }
-  function parseGym(text) {
-    const r = { days: {}, goal: '' };
+  function parsePlan(text) {
+    const r = { sessions: [], goal: '', note: '' };
     parseKV(text).forEach(([k, v]) => {
       const i = DAYKEY.indexOf(k);
-      if (i > -1) r.days[i] = v; else if (k === 'GOAL') r.goal = v;
+      if (i > -1) r.sessions.push({ title: v, day: i });
+      else if (/^S\d{1,2}$/.test(k)) r.sessions.push({ title: v, day: null });
+      else if (k === 'GOAL') r.goal = v;
+      else if (k === 'NOTE') r.note = v;
     });
-    r.ok = Object.keys(r.days).length > 0;
+    // if a day appears twice, keep its last value
+    const lastFor = {};
+    r.sessions.forEach((s, idx) => { if (s.day != null) lastFor[s.day] = idx; });
+    r.sessions = r.sessions.filter((s, idx) => s.day == null || lastFor[s.day] === idx);
+    r.sessions.sort((a, b) => (a.day == null ? 9 : a.day) - (b.day == null ? 9 : b.day));
+    r.ok = r.sessions.length > 0;
     return r;
+  }
+  const blankPlan = (g) => ({
+    sessions: g.days.length ? [...g.days].sort((a, b) => a - b).map((day) => ({ title: '', day }))
+      : Array.from({ length: g.perWeek || 3 }, () => ({ title: '', day: null })),
+    goal: '', note: '',
+  });
+  const cleanPlan = (plan) => ({
+    sessions: plan.sessions.map((s) => ({ ...s, title: s.title.trim() })).filter((s) => s.title),
+    goal: (plan.goal || '').trim(), note: (plan.note || '').trim(), status: 'accepted', at: keyOf(new Date()),
+  });
+
+  /* The week in numbers — shown on Saturday and handed to the AI with the next plan. */
+  function weekReport(state, wk) {
+    const upTo = keyOf(new Date());
+    const ks = weekDays(wk).filter((k) => k <= upTo);
+    const target = trainingTarget(state);
+    const sessions = ks.filter((k) => anchorDone(state.days[k], 'GYM') || ((state.health[k] || {}).exMin || 0) >= 20).length;
+    const km = round1(ks.reduce((n, k) => n + ((state.health[k] || {}).km || 0), 0));
+    const anchors = SECTIONS.map((s) => [s, ks.filter((k) => anchorDone(state.days[k], s)).length]);
+    const plan = state.plans[wk];
+    const done = plan ? sessionsDone(state, plan, wk) : [];
+    const missed = plan ? plan.sessions.filter((s, i) => !done[i]).map((s) => s.title) : [];
+    let verdict;
+    if (sessions >= target) verdict = 'A full training week. Keep the load steady.';
+    else if (sessions === 0) verdict = 'No training logged this week. Start next week small.';
+    else verdict = `${sessions} of ${target} sessions. Plan what you can finish.`;
+    const text = `${sessions} of ${target} sessions${km ? `, ${km} km` : ''}${missed.length ? `; missed: ${missed.join('; ')}` : ''}.`;
+    return { sessions, target, km, anchors, missed, verdict, text, hasData: ks.some((k) => state.days[k]) };
   }
   function parseSocial(text) {
     const r = { style: '', ideas: [], note: '' };
@@ -486,10 +603,20 @@
     if (!profile) return out;
     if (sec === 'GYM') {
       const g = profile.gym;
-      const planned = g.plan && g.plan.days ? g.plan.days[dow] : null;
-      if (planned) out.suggestions.push({ label: 'Today’s plan', title: planned });
-      else if (g.days.length && !g.days.includes(dow)) out.note = 'Rest day. Nothing planned — set an anchor only if you want one.';
-      if (g.plan && g.plan.goal) out.focus = { label: 'This week', text: g.plan.goal };
+      const wk = weekOf(today);
+      const plan = state.plans[wk];
+      const rest = 'Rest day. Nothing planned — set an anchor only if you want one.';
+      if (plan && plan.sessions.length) {
+        const done = sessionsDone(state, plan, wk);
+        const ti = plan.sessions.findIndex((s, i) => s.day === dow && !done[i]);
+        if (ti > -1) out.suggestions.push({ label: 'Today’s plan', title: plan.sessions[ti].title });
+        else if (plan.sessions.every((s) => s.day == null)) {
+          const ni = done.indexOf(false);
+          if (ni > -1) out.suggestions.push({ label: `Next session · ${done.filter(Boolean).length + 1} of ${plan.sessions.length}`, title: plan.sessions[ni].title });
+          else out.note = 'Every session this week is done.';
+        } else if (!plan.sessions.some((s) => s.day === dow)) out.note = rest;
+        if (plan.goal) out.focus = { label: 'This week', text: plan.goal };
+      } else if (g.days.length && !g.days.includes(dow)) out.note = rest;
     } else if (sec === 'BIZ') {
       profile.biz.next.forEach((t) => out.suggestions.push({ label: 'Next step', title: t }));
       if (profile.biz.focus) out.focus = { label: 'Focus this month', text: profile.biz.focus };
@@ -500,7 +627,46 @@
     return out;
   }
 
-  function SectionScreen({ sec, state, today, updateSection, updateProfile }) {
+  /* Saturday: review the week and plan the next. Any other day: plan this week if it has no plan. */
+  function weekToPlan(state, today) {
+    const p = state.profile;
+    if (!p || !p.gym.planner) return null;
+    const thisWk = weekOf(today), nextWk = nextWeekOf(today);
+    if (dateOf(today).getDay() === 6 && !state.plans[nextWk]) return nextWk;
+    if (!state.plans[thisWk]) return thisWk;
+    return null;
+  }
+  function WeekPrompt({ state, today, openPlan, skipWeek }) {
+    const wk = weekToPlan(state, today);
+    if (!wk) return null;
+    const next = wk !== weekOf(today);
+    return (
+      <Card index={0} radius="lg" padding="20px 20px 18px" style={{ border: '1px solid var(--border-strong)' }}>
+        <Label right={`From ${shortDate(wk)}`}>{next ? 'Next week' : 'This week'}</Label>
+        <div className="empty">{next ? 'Your week in review, and next week’s training plan.' : 'No training plan for this week yet.'}</div>
+        <div className="actions start" style={{ marginTop: 14 }}>
+          <button type="button" className="btn" onClick={() => openPlan(wk)}>{next ? 'Review & plan' : 'Plan this week'}</button>
+          {!next && <button type="button" className="btn-quiet" onClick={() => skipWeek(wk)}>Not this week</button>}
+        </div>
+      </Card>
+    );
+  }
+
+  function PlanList({ plan, done }) {
+    return (
+      <div className="rows">
+        {plan.sessions.map((s, i) => (
+          <div className={'row' + (done && done[i] ? ' row-done' : '')} key={i}>
+            <span className="time">{s.day != null ? DAY3[s.day] : `#${i + 1}`}</span>
+            <span className="row-title" dir="auto">{s.title}</span>
+          </div>
+        ))}
+        {(plan.goal || plan.note) && <div className="meta" dir="auto">{[plan.goal, plan.note].filter(Boolean).join(' · ')}</div>}
+      </div>
+    );
+  }
+
+  function SectionScreen({ sec, state, today, updateSection, updateProfile, openPlan, skipWeek }) {
     const day = state.days[today] || emptyDay();
     const s = day[sec];
     const [editing, setEditing] = useState(false);
@@ -520,8 +686,12 @@
       if (sec === 'SOCIAL') updateProfile((p) => ({ ...p, social: { ...p.social, ideas: p.social.ideas.filter((t) => t !== a.title) } }));
       if (editing) toggleEdit();
     };
+    const wk = weekOf(today);
+    const plan = sec === 'GYM' && state.plans[wk] && state.plans[wk].sessions.length ? state.plans[wk] : null;
+    const planDone = plan ? sessionsDone(state, plan, wk) : [];
     return (
       <div className="stack">
+        {sec === 'GYM' && <WeekPrompt state={state} today={today} openPlan={openPlan} skipWeek={skipWeek} />}
         {ctx.focus && (
           <div className="focus">
             <div className="eyebrow">{ctx.focus.label}</div>
@@ -540,9 +710,18 @@
             onToggle={() => updateSection(sec, (x) => ({ ...x, anchor: { ...x.anchor, done: !x.anchor.done } }))} />
         )}
         <Tasks tasks={s.tasks} editing={editing} tint={tint} onChange={(tasks) => updateSection(sec, (x) => ({ ...x, tasks }))} />
+        {plan && (
+          <Card index={2} padding="18px 20px">
+            <Label right={`${planDone.filter(Boolean).length} of ${plan.sessions.length} done`}>This week’s plan</Label>
+            <PlanList plan={plan} done={planDone} />
+            <div className="actions start" style={{ marginTop: 8 }}>
+              <button type="button" className="btn-quiet" onClick={() => openPlan(wk)}>Change the plan</button>
+            </div>
+          </Card>
+        )}
         <div style={{ height: 12 }} />
         {sec === 'GYM'
-          ? <GymStats state={state} today={today} weekGoal={state.settings.weekGoal} />
+          ? <GymStats state={state} today={today} weekGoal={trainingTarget(state)} />
           : <WeekStats state={state} today={today} sec={sec} tint={tint} />}
         <Card index={5} padding="20px 20px 18px" tint={tint}>
           <DotGrid months={monthsFor(state, today, sec)} today={dateOf(today).getDate()} gap={6} />
@@ -556,12 +735,13 @@
     );
   }
 
-  function TodayAM({ state, today, onToggleAnchor, goTab, openSettings }) {
+  function TodayAM({ state, today, onToggleAnchor, goTab, openSettings, openPlan, skipWeek }) {
     const day = state.days[today] || emptyDay();
     const sync = state.sync;
     const synced = sync && sync.date === today;
     return (
       <div className="stack">
+        <WeekPrompt state={state} today={today} openPlan={openPlan} skipWeek={skipWeek} />
         <Card index={0} radius="lg" padding="22px 20px 20px">
           <Label>Today’s anchors</Label>
           <div className="list">
@@ -574,7 +754,7 @@
                   <div className="tag">{sec}</div>
                   {a ? <TaskItem title={a.title} done={a.done} onToggle={() => onToggleAnchor(sec)} />
                      : <button type="button" className="ghost-row" onClick={() => goTab(sec)}>
-                         {plan ? <><span className="chip-label">Today’s plan</span><span dir="auto">{plan.title}</span></>
+                         {plan ? <><span className="chip-label">{plan.label}</span><span dir="auto">{plan.title}</span></>
                            : sec === 'GYM' && ctx.note ? 'Rest day' : `Set the ${sec} anchor`}
                        </button>}
                 </div>
@@ -624,11 +804,12 @@
     );
   }
 
-  function TodayPM({ state, today, onToggleAnchor }) {
+  function TodayPM({ state, today, onToggleAnchor, openPlan, skipWeek }) {
     const day = state.days[today] || emptyDay();
     const open = SECTIONS.filter((s) => day[s].anchor && !day[s].anchor.done);
     return (
       <div className="stack">
+        <WeekPrompt state={state} today={today} openPlan={openPlan} skipWeek={skipWeek} />
         <DailyReport {...buildReport(state, today)} index={0} />
         {open.length > 0 && (
           <Card index={1} padding="18px 20px">
@@ -658,7 +839,7 @@
     );
   }
 
-  function Settings({ state, setState, onClose, flash, applyText, openSetup }) {
+  function Settings({ state, setState, onClose, flash, applyText, openSetup, openPlan }) {
     const [paste, setPaste] = useState('');
     const [restore, setRestore] = useState('');
     const s = state.settings;
@@ -693,8 +874,8 @@
                 <button type="button" className="btn" onClick={() => openSetup(null)}>Edit setup</button>
               </div>
               <div className="claude-links">
-                <div className="eyebrow">Ask Claude again</div>
-                {state.profile.gym.planner === 'claude' && <button type="button" className="btn-quiet" onClick={() => openSetup(['plan'])}>New training week</button>}
+                <div className="eyebrow">Ask the AI again</div>
+                {state.profile.gym.planner && <button type="button" className="btn-quiet" onClick={() => { onClose(); openPlan(weekToPlan(state, keyOf(new Date())) || weekOf(keyOf(new Date()))); }}>Training plan</button>}
                 <button type="button" className="btn-quiet" onClick={() => openSetup(['bizClaude', 'biz'])}>Update my business</button>
                 <button type="button" className="btn-quiet" onClick={() => openSetup(['ideas'])}>New post ideas</button>
               </div>
@@ -820,13 +1001,143 @@
     );
   }
 
+  function PlanEditor({ plan, setPlan }) {
+    const set = (i, patch) => setPlan({ ...plan, sessions: plan.sessions.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
+    return (
+      <div className="form">
+        {plan.sessions.map((s, i) => (
+          <div className="edit-row" key={i}>
+            <span className="time">{s.day != null ? DAY3[s.day] : `#${i + 1}`}</span>
+            <input className="field" dir="auto" aria-label={`Session ${i + 1}`} value={s.title} placeholder="The workout"
+              onChange={(e) => set(i, { title: e.target.value })} />
+            <button type="button" className="btn-quiet" onClick={() => setPlan({ ...plan, sessions: plan.sessions.filter((_, j) => j !== i) })}>Remove</button>
+          </div>
+        ))}
+        <div className="actions start">
+          <button type="button" className="btn-quiet" onClick={() => setPlan({ ...plan, sessions: [...plan.sessions, { title: '', day: null }] })}>Add a session</button>
+        </div>
+        <label htmlFor="plan-goal">Goal for the week</label>
+        <input id="plan-goal" className="field" dir="auto" value={plan.goal || ''} onChange={(e) => setPlan({ ...plan, goal: e.target.value })} />
+      </div>
+    );
+  }
+
+  /* The weekly loop: the AI proposes → "Happy with this plan?" → yes locks it in,
+     no opens changes — with the AI (feedback about real conditions) or by hand.
+     'self' starts in the editor. */
+  function PlanReview({ profile, wk, report, initial, onAccept }) {
+    const g = profile.gym;
+    const self = g.planner === 'self';
+    const [mode, setModeRaw] = useState(initial ? 'review' : self ? 'change' : 'get');
+    const [draft, setDraft] = useState(initial || blankPlan(g));
+    const [parsed, setParsed] = useState(null);
+    const [feedback, setFeedback] = useState('');
+    const [round, setRound] = useState(0);
+    const setMode = (m) => { setParsed(null); setModeRaw(m); };
+    const ready = cleanPlan(draft).sessions.length > 0;
+
+    const question = (plan) => (
+      <div className="plan-q">
+        <div className="bridge-title">Happy with this plan?</div>
+        <div className="actions start">
+          <button type="button" className="btn" onClick={() => onAccept(cleanPlan(plan))}>Yes, lock it in</button>
+          <button type="button" className="btn-quiet" onClick={() => { setDraft({ ...plan, goal: plan.goal || '', note: plan.note || '' }); setMode('change'); }}>No, change it</button>
+        </div>
+      </div>
+    );
+
+    if (mode === 'get') {
+      return (
+        <div className="stack-lg">
+          <ClaudeBridge id={`plan-${wk}`} prompt={planPrompt(profile, wk, report)} parse={parsePlan} onParsed={setParsed}
+            preview={(r) => <PlanList plan={r} />} />
+          {parsed && question(parsed)}
+          <button type="button" className="btn-quiet" style={{ justifySelf: 'start' }} onClick={() => setMode('change')}>Write it myself instead</button>
+        </div>
+      );
+    }
+    if (mode === 'review') {
+      return (
+        <div className="stack-lg">
+          <Card padding="18px 20px" animate={false}><Label>The plan</Label><PlanList plan={draft} /></Card>
+          {question(draft)}
+        </div>
+      );
+    }
+    const withAI = (
+      <Card key="ai" padding="18px 20px" animate={false}>
+        <Label>{self ? 'Want the AI’s take?' : 'Change it with the AI'}</Label>
+        <p className="meta" style={{ margin: '0 0 12px' }}>Tell it what doesn’t fit: your time, the weather, your gear, where you can ride or run. You can keep talking it through in Claude, then paste the final plan here.</p>
+        <textarea id={`plan-feedback-${wk}`} className="field" rows={3} dir="auto" value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          placeholder="Only 45 minutes on Tuesday. Rain on Thursday, so the trainer, not the road." />
+        <div style={{ height: 18 }} />
+        <ClaudeBridge key={round} id={`plan-rev-${wk}`} prompt={revisePrompt(profile, wk, draft, feedback)} parse={parsePlan} onParsed={setParsed}
+          preview={(r) => <PlanList plan={r} />} />
+        {parsed && (
+          <div className="actions start" style={{ marginTop: 14 }}>
+            <button type="button" className="btn" onClick={() => { setDraft(parsed); setRound((r) => r + 1); setMode('review'); }}>Review the new plan</button>
+          </div>
+        )}
+      </Card>
+    );
+    const byHand = (
+      <Card key="hand" padding="18px 20px" animate={false}>
+        <Label>{self ? 'Your week' : 'Or edit it yourself'}</Label>
+        <PlanEditor plan={draft} setPlan={setDraft} />
+        <div className="actions start" style={{ marginTop: 16 }}>
+          <button type="button" className="btn" disabled={!ready} onClick={() => onAccept(cleanPlan(draft))}>Save the plan</button>
+        </div>
+      </Card>
+    );
+    return <div className="stack-lg">{self ? [byHand, withAI] : [withAI, byHand]}</div>;
+  }
+
+  function PlanSheet({ state, wk, onClose, onAccept }) {
+    const p = state.profile;
+    const today = keyOf(new Date());
+    const thisWk = weekOf(today);
+    const reviewWk = wk === thisWk ? keyOf(addDays(dateOf(thisWk), -7)) : thisWk;
+    const rep = weekReport(state, reviewWk);
+    const existing = state.plans[wk] && state.plans[wk].sessions.length ? state.plans[wk] : null;
+    return (
+      <div className="sheet" role="dialog" aria-modal="true" aria-label="Training plan">
+        <div className="sheet-head">
+          <div>
+            <div className="eyebrow">{PLANNERS[p.gym.planner] || 'Training'}</div>
+            <div className="title">Week of {shortDate(wk)}</div>
+          </div>
+          <button type="button" className="pill" onClick={onClose}>Close</button>
+        </div>
+        <div className="stack">
+          {rep.hasData && (
+            <Card padding="18px 20px" animate={false}>
+              <Label>{reviewWk === thisWk ? 'This week so far' : 'Last week'}</Label>
+              <div className="report-row">
+                <Stat value={rep.sessions} unit={`of ${rep.target}`} label="Sessions" />
+                {rep.km > 0 && <Stat value={rep.km} unit="km" label="Distance" />}
+              </div>
+              <div className="summary-main" style={{ marginTop: 16 }}>{rep.verdict}</div>
+              <div className="meta" dir="auto" style={{ marginTop: 4 }}>
+                Anchors closed · {rep.anchors.map(([s, n]) => `${s} ${n}`).join(' · ')}{rep.missed.length ? ` · Missed: ${rep.missed.join(', ')}` : ''}
+              </div>
+            </Card>
+          )}
+          <PlanReview key={wk} profile={p} wk={wk} report={rep.hasData ? rep.text : null} initial={existing} onAccept={onAccept} />
+        </div>
+      </div>
+    );
+  }
+
   function ProfileSummary({ profile }) {
     const g = profile.gym, b = profile.biz, s = profile.social;
     const rows = [
       ['GYM', [
         withOther(g.sports, g.other).join(', ') || 'No sport picked',
-        g.days.length ? `${g.days.length} day${g.days.length === 1 ? '' : 's'} a week · ${dayList(g.days)}` : null,
-        g.planner === 'claude' ? (g.plan ? 'Claude plans · this week is ready' : 'Claude plans your workouts') : g.planner === 'self' ? 'You plan your workouts' : null,
+        g.days.length ? `${g.days.length} fixed day${g.days.length === 1 ? '' : 's'} · ${dayList(g.days)}`
+          : g.perWeek ? `${g.perWeek} time${g.perWeek === 1 ? '' : 's'} a week · no fixed days` : null,
+        g.planner ? PLANNERS[g.planner] + (g.minutes ? ` · ${g.minutes} min sessions` : '') : null,
+        g.planner && g.planner !== 'self' && g.conditions.trim() ? 'Your conditions are noted for the AI' : null,
       ]],
       ['BIZ', [
         b.name || 'Business not described yet',
@@ -853,12 +1164,21 @@
     );
   }
 
+  function conditionsHint(sports) {
+    if (sports.includes('Cycling')) return 'Road bike. Flat routes near home, one climb 20 minutes away. Indoor trainer when it rains.';
+    if (sports.includes('Running')) return 'Park loop of 5 km near home, a track 10 minutes away. My knee feels it after 15 km.';
+    if (sports.includes('Gym') || sports.includes('CrossFit')) return 'Gym near the office with full equipment. At home: dumbbells up to 20 kg.';
+    if (sports.includes('Swimming')) return '25 m pool, open three mornings a week. Sea swims in summer.';
+    return 'Where you train, what gear you have, how much time, anything that hurts.';
+  }
+
   const OB_STEPS = [
     { id: 'welcome', sec: 'LOCKFLOW' },
     { id: 'sports', sec: 'GYM' },
     { id: 'days', sec: 'GYM' },
     { id: 'planner', sec: 'GYM' },
-    { id: 'plan', sec: 'GYM', bridge: true, when: (p) => p.gym.planner === 'claude' },
+    { id: 'conditions', sec: 'GYM', when: (p) => p.gym.planner === 'ai' || p.gym.planner === 'mix' },
+    { id: 'plan', sec: 'GYM', when: (p) => !!p.gym.planner },
     { id: 'bizClaude', sec: 'BIZ', bridge: true },
     { id: 'biz', sec: 'BIZ' },
     { id: 'post', sec: 'SOCIAL' },
@@ -889,8 +1209,7 @@
     const back = () => { if (i > 0) setOb((o) => ({ ...o, stepId: steps[i - 1].id })); };
     const useParsed = () => {
       if (!parsed) return;
-      if (step.id === 'plan') advance({ ...p, gym: { ...p.gym, plan: { days: parsed.days, goal: parsed.goal, at: keyOf(new Date()) } } });
-      else if (step.id === 'bizClaude') {
+      if (step.id === 'bizClaude') {
         advance({ ...p, biz: { ...p.biz, name: parsed.name || p.biz.name, what: parsed.what || p.biz.what, stage: parsed.stage || p.biz.stage, focus: parsed.focus || p.biz.focus, next: parsed.next.length ? parsed.next : p.biz.next } });
       } else if (step.id === 'ideas') advance({ ...p, social: { ...p.social, style: parsed.style, ideas: parsed.ideas, note: parsed.note } });
     };
@@ -919,36 +1238,68 @@
           </>
         );
         break;
-      case 'days':
+      case 'days': {
+        const g = p.gym;
         body = (
           <>
-            <h1 className="ob-q">Which days can you train?</h1>
-            <p className="ob-sub">{p.gym.days.length ? `${p.gym.days.length} day${p.gym.days.length === 1 ? '' : 's'} a week.` : 'Pick the days that usually work.'} Your weekly ring counts toward this.</p>
-            <Chips options={DAY3.map((label, value) => ({ label, value }))} selected={p.gym.days}
-              onToggle={(v) => setP('gym', { days: toggleIn(p.gym.days, v) })} />
+            <h1 className="ob-q">How often can you train?</h1>
+            <p className="ob-sub">Pick fixed days, or just a number if your week moves around.</p>
+            <div className="ob-label">Fixed days</div>
+            <Chips options={DAY3.map((label, value) => ({ label, value }))} selected={g.days}
+              onToggle={(v) => setP('gym', { days: toggleIn(g.days, v), perWeek: null })} />
+            <div className="ob-or" aria-hidden="true"><span>or</span></div>
+            <div className="ob-label">My schedule moves · times a week</div>
+            <Chips options={[1, 2, 3, 4, 5, 6, 7]} selected={g.perWeek ? [g.perWeek] : []}
+              onToggle={(v) => setP('gym', { perWeek: g.perWeek === v ? null : v, days: [] })} />
+            <p className="meta ob-gap" style={{ minHeight: 40 }}>
+              {g.days.length ? `${g.days.length} fixed day${g.days.length === 1 ? '' : 's'}: ${dayList(g.days)}. Your weekly ring counts toward this.`
+                : g.perWeek ? `${g.perWeek} time${g.perWeek === 1 ? '' : 's'} a week, any days. Every Saturday you plan the next week, so it fits how that week looks.`
+                  : ''}
+            </p>
           </>
         );
         break;
+      }
       case 'planner':
         body = (
           <>
-            <h1 className="ob-q">Who plans your workouts?</h1>
+            <h1 className="ob-q">Which training plan?</h1>
+            <p className="ob-sub">Every Saturday you get next week’s plan and a short report on this one. You say if you’re happy with it, or change it.</p>
             <div className="options">
-              <OptionCard selected={p.gym.planner === 'claude'} onClick={() => setP('gym', { planner: 'claude' })}
-                title="Claude plans them" body="Claude builds your week from your sports, your days and what it knows about you. Each morning LOCKFLOW shows today’s workout." />
+              <OptionCard selected={p.gym.planner === 'ai'} onClick={() => setP('gym', { planner: 'ai' })}
+                title="AI plan" body="The AI plans your week from your sports, your schedule and what it knows about you. You approve it, or ask for changes." />
               <OptionCard selected={p.gym.planner === 'self'} onClick={() => setP('gym', { planner: 'self' })}
-                title="I plan my own" body="LOCKFLOW keeps the anchor and counts the week. You decide what each session is." />
+                title="My own plan" body="You write the week yourself. LOCKFLOW shows today’s session and counts the week." />
+              <OptionCard selected={p.gym.planner === 'mix'} onClick={() => setP('gym', { planner: 'mix' })}
+                title="Mix both" body="The AI drafts a starting plan, then you shape it together around your real conditions: where you train, your gear, your time." />
             </div>
+          </>
+        );
+        break;
+      case 'conditions':
+        body = (
+          <>
+            <h1 className="ob-q">What should the AI know?</h1>
+            <p className="ob-sub">So it plans for your real life, not a random week. Where you train, your gear, your routes, anything that hurts.</p>
+            <textarea id="ob-conditions" className="field" rows={5} dir="auto" value={p.gym.conditions}
+              placeholder={conditionsHint(p.gym.sports)} onChange={(e) => setP('gym', { conditions: e.target.value })} />
+            <div className="ob-label ob-gap">Time per session</div>
+            <Chips options={[30, 45, 60, 90].map((m) => ({ value: m, label: `${m} min` }))} selected={p.gym.minutes ? [p.gym.minutes] : []}
+              onToggle={(v) => setP('gym', { minutes: p.gym.minutes === v ? null : v })} />
           </>
         );
         break;
       case 'plan':
         body = (
           <>
-            <h1 className="ob-q">Get this week from Claude</h1>
-            <p className="ob-sub">One workout for each training day. Claude uses what it already knows about you from your chats.</p>
-            <ClaudeBridge id="ob-plan" prompt={gymPrompt(p)} parse={parseGym} onParsed={setParsed}
-              preview={(r) => <PreviewList rows={Object.keys(r.days).map(Number).sort((a, b) => a - b).map((d) => [DAY3[d], r.days[d]])} foot={r.goal} />} />
+            <h1 className="ob-q">{p.gym.planner === 'self' ? 'Write this week' : 'Get this week’s plan'}</h1>
+            <p className="ob-sub">
+              {p.gym.planner === 'self' ? 'One line per session. You can change it any time.'
+                : p.gym.planner === 'mix' ? 'The AI sends a first draft. If it doesn’t fit, say no and shape it together.'
+                  : 'The AI plans your week. If it doesn’t fit, say no and tell it what to change.'}
+            </p>
+            <PlanReview profile={p} wk={weekOf(keyOf(new Date()))} report={null} initial={p.gym.firstPlan}
+              onAccept={(plan) => advance({ ...p, gym: { ...p.gym, firstPlan: plan } })} />
           </>
         );
         break;
@@ -1057,7 +1408,11 @@
     }
 
     let primary;
-    if (step.bridge) {
+    if (step.id === 'plan') {
+      primary = p.gym.firstPlan
+        ? <button type="button" className="btn btn-lg" onClick={() => advance()}>Continue</button>
+        : <button type="button" className="btn-quiet" onClick={() => advance()}>Skip for now</button>;
+    } else if (step.bridge) {
       primary = (
         <div className="ob-foot-right">
           <button type="button" className="btn-quiet" onClick={() => advance()}>{step.id === 'bizClaude' ? 'Write it myself' : 'Skip for now'}</button>
@@ -1110,6 +1465,7 @@
     const session = override && override.day === today && override.auto === autoSession ? override.session : autoSession;
     const [tab, setTab] = useState('TODAY');
     const [sheet, setSheet] = useState(false);
+    const [planWeek, setPlanWeek] = useState(null);
     const [toast, setToast] = useState(null);
 
     useEffect(() => { saveState(state); }, [state]);
@@ -1148,14 +1504,26 @@
     const ob = state.onboarding || (onboarded ? null : freshOb(state));
     const setOb = (fn) => setState((s) => ({ ...s, onboarding: fn(s.onboarding || freshOb(s)) }));
     const finishOnboarding = (prof) => {
-      setState((s) => ({
-        ...s,
-        profile: { ...prof, onboarded: true },
-        onboarding: null,
-        settings: { ...s.settings, weekGoal: prof.gym.days.length || s.settings.weekGoal },
-      }));
+      const wk = weekOf(keyOf(new Date()));
+      setState((s) => {
+        const plans = { ...s.plans };
+        if (prof.gym.firstPlan && prof.gym.firstPlan.sessions.length) plans[wk] = prof.gym.firstPlan;
+        return {
+          ...s, plans,
+          profile: { ...prof, gym: { ...prof.gym, firstPlan: null }, onboarded: true },
+          onboarding: null,
+          settings: { ...s.settings, weekGoal: prof.gym.days.length || prof.gym.perWeek || s.settings.weekGoal },
+        };
+      });
       setTab('TODAY');
     };
+    const openPlan = (wk) => { setSheet(false); setPlanWeek(wk); };
+    const acceptPlan = (wk, plan) => {
+      setState((s) => ({ ...s, plans: { ...s.plans, [wk]: plan } }));
+      setPlanWeek(null);
+      setToast(`Plan locked in · week of ${shortDate(wk)}`);
+    };
+    const skipWeek = (wk) => setState((s) => ({ ...s, plans: { ...s.plans, [wk]: { sessions: [], goal: '', note: '', status: 'skipped' } } }));
     const openSetup = (only) => {
       setSheet(false);
       setState((s) => ({ ...s, onboarding: { stepId: only ? only[0] : 'sports', profile: s.profile || emptyProfile(), only } }));
@@ -1174,10 +1542,10 @@
     let content;
     if (tab === 'TODAY') {
       content = session === 'am'
-        ? <TodayAM state={state} today={today} onToggleAnchor={toggleAnchor} goTab={setTab} openSettings={() => setSheet(true)} />
-        : <TodayPM state={state} today={today} onToggleAnchor={toggleAnchor} />;
+        ? <TodayAM state={state} today={today} onToggleAnchor={toggleAnchor} goTab={setTab} openSettings={() => setSheet(true)} openPlan={openPlan} skipWeek={skipWeek} />
+        : <TodayPM state={state} today={today} onToggleAnchor={toggleAnchor} openPlan={openPlan} skipWeek={skipWeek} />;
     } else {
-      content = <SectionScreen key={tab} sec={tab} state={state} today={today} updateSection={updateSection} updateProfile={updateProfile} />;
+      content = <SectionScreen key={tab} sec={tab} state={state} today={today} updateSection={updateSection} updateProfile={updateProfile} openPlan={openPlan} skipWeek={skipWeek} />;
     }
 
     return (
@@ -1196,7 +1564,10 @@
         <div className="fade" aria-hidden="true" />
         <FloatingBar items={TABS} active={tab} onChange={setTab}
           style={{ bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))', zIndex: 3 }} />
-        {sheet && <Settings state={state} setState={setState} onClose={() => setSheet(false)} flash={setToast} applyText={applyText} openSetup={openSetup} />}
+        {sheet && <Settings state={state} setState={setState} onClose={() => setSheet(false)} flash={setToast} applyText={applyText} openSetup={openSetup} openPlan={openPlan} />}
+        {planWeek && state.profile && (
+          <PlanSheet state={state} wk={planWeek} onClose={() => setPlanWeek(null)} onAccept={(plan) => acceptPlan(planWeek, plan)} />
+        )}
         {toast && <div className="toast" role="status">{toast}</div>}
       </div>
     );

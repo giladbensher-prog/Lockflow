@@ -187,6 +187,16 @@
     border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;margin:8px 0 0;direction:ltr;text-align:left}
   .got{background:var(--surface-card);border-radius:var(--radius-sm);padding:14px 16px}
 
+  /* training plan */
+  .stack-lg{display:grid;gap:20px}
+  .ob-or{display:flex;align-items:center;gap:12px;margin:22px 0 14px;color:var(--fg-3);font-size:var(--text-label);
+    letter-spacing:var(--tracking-label);text-transform:uppercase}
+  .ob-or::before,.ob-or::after{content:'';flex:1;height:1px;background:var(--border-subtle)}
+  .plan-q{display:grid;gap:12px;background:var(--surface-card);border:1px solid var(--border-strong);border-radius:var(--radius-md);padding:18px 20px}
+  .report-row{display:flex;flex-wrap:wrap;gap:16px 36px}
+  .row-done .row-title{color:var(--fg-3);text-decoration:line-through;text-decoration-color:var(--fg-4)}
+  .row-done .time{color:var(--accent)}
+
   :focus-visible{outline:2px solid var(--fg-2);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 </style>
